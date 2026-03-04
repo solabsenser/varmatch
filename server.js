@@ -12,32 +12,23 @@ const getEnv = (key, fallback = '') => {
 
 const PORT = Number(getEnv('PORT', 3000));
 const DB_FILE = getEnv('DB_FILE', './streams_db.json');
-const REFRESH_MATCHES_CRON = getEnv('REFRESH_MATCHES_CRON', '*/1 * * * *');
-const REFRESH_STATS_CRON = getEnv('REFRESH_STATS_CRON', '*/1 * * * *');
-const REFRESH_STREAMS_CRON = getEnv('REFRESH_STREAMS_CRON', '*/5 * * * *');
 const APP_TITLE = getEnv('APP_TITLE', 'VarMatch TV');
-const APP_VERSION = getEnv('APP_VERSION', 'v3.0');
+const APP_VERSION = getEnv('APP_VERSION', 'v3.1');
+const DONOR_STREAM_URL = getEnv('DONOR_STREAM_URL', '');
+const BASE_UPDATE_CRON = getEnv('REFRESH_MATCHES_CRON', '*/10 * * * *');
+const FOOTBALL_API_URL = getEnv('FOOTBALL_API_URL', 'https://v3.football.api-sports.io/fixtures');
+const FOOTBALL_API_KEY = getEnv('FOOTBALL_API_KEY', '');
+const FOOTBALL_API_HOST = getEnv('FOOTBALL_API_HOST', 'v3.football.api-sports.io');
 
-const LEAGUES = ['Premier League', 'La Liga', 'Champions League', 'Serie A', 'Bundesliga'];
-const CLUBS = [
-  { name: 'Arsenal', logo: 'https://via.placeholder.com/40x40?text=ARS' },
-  { name: 'Chelsea', logo: 'https://via.placeholder.com/40x40?text=CHE' },
-  { name: 'Real Madrid', logo: 'https://via.placeholder.com/40x40?text=RMA' },
-  { name: 'Barcelona', logo: 'https://via.placeholder.com/40x40?text=BAR' },
-  { name: 'Inter', logo: 'https://via.placeholder.com/40x40?text=INT' },
-  { name: 'Milan', logo: 'https://via.placeholder.com/40x40?text=MIL' },
-  { name: 'Bayern', logo: 'https://via.placeholder.com/40x40?text=BAY' },
-  { name: 'Dortmund', logo: 'https://via.placeholder.com/40x40?text=BVB' },
-  { name: 'PSG', logo: 'https://via.placeholder.com/40x40?text=PSG' },
-  { name: 'Liverpool', logo: 'https://via.placeholder.com/40x40?text=LIV' }
-];
+const LIVE_STATUSES = new Set(['LIVE', '1H', '2H', 'HT']);
+const SCHEDULED_STATUSES = new Set(['NS', 'TBD', 'PST', 'SUSP', 'INT']);
 
 const UI_CONFIG = {
   appTitle: APP_TITLE,
   appVersion: APP_VERSION,
-  refreshMatchesMs: 60000,
+  refreshMatchesMs: 30000,
   refreshStatsMs: 30000,
-  refreshStreamsMs: 300000,
+  refreshStreamsMs: 600000,
   accentColor: getEnv('ACCENT_COLOR', '#f43f5e')
 };
 
@@ -59,152 +50,182 @@ const readDb = () => {
 
 const writeDb = (payload) => fs.writeFileSync(DB_FILE, JSON.stringify(payload, null, 2));
 
-const pick = (arr, i) => arr[i % arr.length];
-const createId = (home, away, startTime) => Buffer.from(`${home}-${away}-${startTime}`).toString('base64url');
+const toIsoDate = (date) => date.toISOString().slice(0, 10);
+const addDays = (date, diff) => new Date(date.getTime() + diff * 86400000);
 
-const toStatus = (startIso) => {
-  const start = new Date(startIso).getTime();
-  const now = Date.now();
-  const diff = Math.floor((now - start) / 60000);
-
-  if (diff < 0) return { status: 'UPCOMING', minute: null };
-  if (diff < 45) return { status: 'LIVE', minute: `${diff}'` };
-  if (diff < 60) return { status: 'HT', minute: 'HT' };
-  if (diff < 105) return { status: 'LIVE', minute: `${diff - 15}'` };
-  return { status: 'FT', minute: 'FT' };
+const normalizeStatus = (short) => {
+  if (LIVE_STATUSES.has(short)) return short;
+  if (short === 'FT' || short === 'AET' || short === 'PEN') return 'FINISHED';
+  if (SCHEDULED_STATUSES.has(short)) return 'NOT_STARTED';
+  return short || 'UNKNOWN';
 };
 
-const createMockMatches = () => {
-  const now = Date.now();
-  return Array.from({ length: 14 }).map((_, i) => {
-    const home = pick(CLUBS, i);
-    const away = pick(CLUBS, i + 3);
-    const startOffsetMin = (i - 6) * 30;
-    const startTime = new Date(now + startOffsetMin * 60000).toISOString();
-    const state = toStatus(startTime);
+const normalizeFixture = (item) => {
+  const fixture = item.fixture || {};
+  const teams = item.teams || {};
+  const league = item.league || {};
+  const goals = item.goals || {};
+  const shortStatus = fixture.status?.short || '';
 
-    return {
-      id: createId(home.name, away.name, startTime),
-      competition: pick(LEAGUES, i),
-      startTime,
-      homeTeam: home,
-      awayTeam: away,
-      score: {
-        home: state.status === 'UPCOMING' ? 0 : Math.floor(Math.random() * 3),
-        away: state.status === 'UPCOMING' ? 0 : Math.floor(Math.random() * 3)
-      },
-      status: state.status,
-      minute: state.minute,
-      streams: [],
-      stats: {
-        possessionHome: 50,
-        possessionAway: 50,
-        shotsHome: 0,
-        shotsAway: 0,
-        cornersHome: 0,
-        cornersAway: 0,
-        yellowCardsHome: 0,
-        yellowCardsAway: 0
-      },
-      updatedAt: new Date().toISOString()
-    };
+  return {
+    id: String(fixture.id),
+    competition: league.name || 'Unknown League',
+    startTime: fixture.date,
+    homeTeam: {
+      name: teams.home?.name || 'Home',
+      logo: teams.home?.logo || ''
+    },
+    awayTeam: {
+      name: teams.away?.name || 'Away',
+      logo: teams.away?.logo || ''
+    },
+    score: {
+      home: goals.home ?? 0,
+      away: goals.away ?? 0
+    },
+    status: normalizeStatus(shortStatus),
+    apiStatus: shortStatus,
+    minute: fixture.status?.elapsed ?? null,
+    streams: DONOR_STREAM_URL
+      ? [{ provider: 'Donor', type: 'iframe', url: DONOR_STREAM_URL, embed: true }]
+      : [],
+    stats: {
+      possessionHome: 50,
+      possessionAway: 50,
+      shotsHome: 0,
+      shotsAway: 0,
+      cornersHome: 0,
+      cornersAway: 0,
+      yellowCardsHome: 0,
+      yellowCardsAway: 0
+    },
+    updatedAt: new Date().toISOString()
+  };
+};
+
+const isLive = (m) => LIVE_STATUSES.has(m.apiStatus) || m.status === 'LIVE';
+const isToday = (m, today) => String(m.startTime).slice(0, 10) === today;
+const isTomorrow = (m, tomorrow) => String(m.startTime).slice(0, 10) === tomorrow;
+
+const mergeUniqueById = (existing, incoming) => {
+  const byId = new Map(existing.map((m) => [m.id, m]));
+  for (const match of incoming) {
+    const prev = byId.get(match.id);
+    byId.set(match.id, {
+      ...(prev || {}),
+      ...match,
+      streams: match.streams?.length ? match.streams : (prev?.streams || [])
+    });
+  }
+  return [...byId.values()];
+};
+
+const removeOldFinished = (matches) => {
+  const now = Date.now();
+  const maxAgeMs = 24 * 60 * 60 * 1000;
+  return matches.filter((m) => {
+    if (m.status !== 'FINISHED' || !m.startTime) return true;
+    return now - new Date(m.startTime).getTime() <= maxAgeMs;
   });
 };
 
-const buildSearchQueries = (match) => {
-  const a = match.homeTeam.name;
-  const b = match.awayTeam.name;
-  return [
-    `${a} vs ${b} live stream`,
-    `${a} ${b} live match`,
-    `${match.competition} ${a} vs ${b} live`
-  ];
+const sortForUi = (matches, today, tomorrow) => {
+  const rank = (m) => {
+    if (isLive(m)) return 0;
+    if (isToday(m, today)) return 1;
+    if (isTomorrow(m, tomorrow)) return 2;
+    return 3;
+  };
+
+  return [...matches].sort((a, b) => {
+    const byRank = rank(a) - rank(b);
+    if (byRank !== 0) return byRank;
+    return new Date(a.startTime) - new Date(b.startTime);
+  });
 };
 
-const attachStreams = (matches) => matches.map((match) => ({
-  ...match,
-  streams: [
-    {
-      provider: 'YouTube',
-      type: 'iframe',
-      url: `https://www.youtube.com/embed/live_stream?channel=UC4R8DWoMoI7CAwX8_LjQHig`,
-      embed: true
-    },
-    {
-      provider: 'Twitch',
-      type: 'iframe',
-      url: `https://player.twitch.tv/?channel=riotgames&parent=localhost`,
-      embed: true
+async function fetchFixturesByDate(dateStr) {
+  if (!FOOTBALL_API_KEY) {
+    console.warn('⚠️ FOOTBALL_API_KEY отсутствует — данные матчей не обновлены');
+    return [];
+  }
+
+  const url = new URL(FOOTBALL_API_URL);
+  url.searchParams.set('date', dateStr);
+
+  const response = await fetch(url, {
+    headers: {
+      'x-apisports-key': FOOTBALL_API_KEY,
+      'x-apisports-host': FOOTBALL_API_HOST
     }
-  ],
-  searchQueries: buildSearchQueries(match)
-}));
+  });
 
-const updateMatchStates = (matches) => matches.map((match) => {
-  const state = toStatus(match.startTime);
-  const isLive = state.status === 'LIVE';
-
-  const score = { ...match.score };
-  if (isLive && Math.random() < 0.07) {
-    if (Math.random() < 0.5) score.home += 1;
-    else score.away += 1;
+  if (!response.ok) {
+    throw new Error(`Football API error: ${response.status}`);
   }
 
-  const stats = { ...match.stats };
-  if (isLive) {
-    stats.shotsHome += Math.round(Math.random());
-    stats.shotsAway += Math.round(Math.random());
-    stats.cornersHome += Math.random() < 0.15 ? 1 : 0;
-    stats.cornersAway += Math.random() < 0.15 ? 1 : 0;
-    stats.yellowCardsHome += Math.random() < 0.05 ? 1 : 0;
-    stats.yellowCardsAway += Math.random() < 0.05 ? 1 : 0;
-    const swing = Math.floor(Math.random() * 3) - 1;
-    stats.possessionHome = Math.max(35, Math.min(65, stats.possessionHome + swing));
-    stats.possessionAway = 100 - stats.possessionHome;
-  }
-
-  return {
-    ...match,
-    status: state.status,
-    minute: state.minute,
-    score,
-    stats,
-    updatedAt: new Date().toISOString()
-  };
-});
-
-const sortByStartTime = (a, b) => new Date(a.startTime) - new Date(b.startTime);
-
-function initDb() {
-  const db = readDb();
-  if (!db.matches.length) {
-    const seeded = attachStreams(createMockMatches());
-    writeDb({ ...db, matches: seeded, updatedAt: new Date().toISOString() });
-  }
+  const payload = await response.json();
+  return Array.isArray(payload.response) ? payload.response.map(normalizeFixture) : [];
 }
 
-function refreshMatches() {
+async function refreshMatchesFromApi() {
+  const now = new Date();
+  const today = toIsoDate(now);
+  const tomorrow = toIsoDate(addDays(now, 1));
+
+  const [todayMatches, tomorrowMatches] = await Promise.all([
+    fetchFixturesByDate(today),
+    fetchFixturesByDate(tomorrow)
+  ]);
+
+  const candidates = [...todayMatches, ...tomorrowMatches].filter(
+    (m) => isLive(m) || isToday(m, today) || isTomorrow(m, tomorrow)
+  );
+
   const db = readDb();
-  const matches = updateMatchStates(db.matches).sort(sortByStartTime);
-  writeDb({ ...db, matches, updatedAt: new Date().toISOString() });
-  console.log(`✅ Обновлены матчи: ${matches.length}`);
+  const merged = mergeUniqueById(db.matches, candidates);
+  const pruned = removeOldFinished(merged).filter(
+    (m) => isLive(m) || isToday(m, today) || isTomorrow(m, tomorrow)
+  );
+  const sorted = sortForUi(pruned, today, tomorrow);
+
+  writeDb({ ...db, matches: sorted, updatedAt: new Date().toISOString() });
+  console.log(`✅ Обновлены матчи из API: ${sorted.length}`);
 }
 
-function refreshStats() {
+async function refreshLiveMatches() {
   const db = readDb();
-  const matches = updateMatchStates(db.matches);
-  writeDb({ ...db, matches, lastStatsUpdateAt: new Date().toISOString() });
-  console.log('📊 Обновлена статистика');
+  const live = db.matches.filter(isLive);
+  if (!live.length) return;
+
+  try {
+    const now = new Date();
+    const today = toIsoDate(now);
+    const tomorrow = toIsoDate(addDays(now, 1));
+    const [todayMatches, tomorrowMatches] = await Promise.all([
+      fetchFixturesByDate(today),
+      fetchFixturesByDate(tomorrow)
+    ]);
+    const merged = mergeUniqueById(db.matches, [...todayMatches, ...tomorrowMatches]);
+    const sorted = sortForUi(removeOldFinished(merged), today, tomorrow);
+    writeDb({ ...db, matches: sorted, lastStatsUpdateAt: new Date().toISOString() });
+    console.log('📊 Обновлены LIVE матчи (30с)');
+  } catch (error) {
+    console.error('❌ Ошибка обновления LIVE матчей:', error.message);
+  }
 }
 
 function refreshStreams() {
   const db = readDb();
-  const matches = attachStreams(db.matches);
+  const matches = db.matches.map((match) => ({
+    ...match,
+    streams: DONOR_STREAM_URL
+      ? [{ provider: 'Donor', type: 'iframe', url: DONOR_STREAM_URL, embed: true }]
+      : []
+  }));
   writeDb({ ...db, matches, lastStreamScanAt: new Date().toISOString() });
-  console.log('🎥 Обновлены источники трансляций');
+  console.log('🎥 Обновлены donor-ссылки трансляций');
 }
-
-const filterByStatus = (matches, status) => matches.filter((m) => m.status === status);
 
 app.get('/healthz', (_req, res) => {
   res.json({ status: 'ok', app: APP_TITLE, version: APP_VERSION });
@@ -217,8 +238,8 @@ app.get('/matches', (req, res) => {
   const status = String(req.query.status || '').toUpperCase();
   const league = String(req.query.league || '').toLowerCase();
 
-  let matches = [...db.matches].sort(sortByStartTime);
-  if (status) matches = matches.filter((m) => m.status === status);
+  let matches = [...db.matches];
+  if (status) matches = matches.filter((m) => String(m.status).toUpperCase() === status);
   if (league) matches = matches.filter((m) => m.competition.toLowerCase().includes(league));
 
   res.json({ total: matches.length, updatedAt: db.updatedAt, matches });
@@ -226,7 +247,7 @@ app.get('/matches', (req, res) => {
 
 app.get('/live', (_req, res) => {
   const db = readDb();
-  const live = db.matches.filter((m) => m.status === 'LIVE' || m.status === 'HT');
+  const live = db.matches.filter(isLive);
   res.json({ total: live.length, updatedAt: db.updatedAt, matches: live });
 });
 
@@ -249,7 +270,6 @@ app.get('/search', (req, res) => {
   return res.json(fuse.search(q).map((x) => x.item));
 });
 
-// backward compatibility
 app.get('/api/matches', (_req, res) => {
   const db = readDb();
   res.json(db.matches);
@@ -267,7 +287,7 @@ app.get('/api/matches/:id/stream', (req, res) => {
   const item = db.matches.find((m) => m.id === req.params.id);
   if (!item) return res.status(404).json({ error: 'Матч не найден' });
   const stream = item.streams.find((s) => s.embed);
-  if (!stream) return res.status(404).json({ error: 'Поток не найден' });
+  if (!stream) return res.status(404).json({ error: 'Поток не найден: укажите DONOR_STREAM_URL' });
   return res.json({
     id: item.id,
     title: `${item.homeTeam.name} vs ${item.awayTeam.name}`,
@@ -281,11 +301,16 @@ app.get('/api/matches/:id/stream', (req, res) => {
   });
 });
 
-initDb();
-cron.schedule(REFRESH_MATCHES_CRON, refreshMatches);
-cron.schedule(REFRESH_STATS_CRON, refreshStats);
-cron.schedule(REFRESH_STREAMS_CRON, refreshStreams);
-refreshMatches();
-refreshStreams();
+cron.schedule(BASE_UPDATE_CRON, () => {
+  refreshMatchesFromApi().catch((error) => {
+    console.error('❌ Ошибка обновления матчей:', error.message);
+  });
+});
+setInterval(refreshLiveMatches, 30000);
+setInterval(refreshStreams, 10 * 60 * 1000);
+
+refreshMatchesFromApi()
+  .then(refreshStreams)
+  .catch((error) => console.error('❌ Ошибка первичной загрузки:', error.message));
 
 app.listen(PORT, () => console.log(`Server running on :${PORT}`));

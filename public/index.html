@@ -28,7 +28,7 @@
     <section class="card top">
       <div>
         <h1 id="title">VarMatch TV</h1>
-        <div id="meta" class="status">Live-центр футбольных матчей</div>
+        <div id="meta" class="status">Реальные матчи: LIVE / TODAY / TOMORROW</div>
       </div>
       <input id="search" class="search" placeholder="Поиск: команда, турнир, матч" />
     </section>
@@ -40,16 +40,20 @@
 
     <section class="columns">
       <article class="card">
-        <h3>Live Matches</h3>
+        <h3>LIVE</h3>
         <div id="live"></div>
       </article>
       <article class="card">
-        <h3>Upcoming Matches</h3>
-        <div id="upcoming"></div>
+        <h3>TODAY</h3>
+        <div id="today"></div>
       </article>
       <article class="card">
-        <h3>Finished Matches</h3>
-        <div id="finished"></div>
+        <h3>TOMORROW</h3>
+        <div id="tomorrow"></div>
+      </article>
+      <article class="card">
+        <h3>Starting Soon (≤ 30 мин)</h3>
+        <div id="startingSoon"></div>
       </article>
     </section>
 
@@ -62,45 +66,88 @@
       meta: document.getElementById('meta'),
       search: document.getElementById('search'),
       live: document.getElementById('live'),
-      upcoming: document.getElementById('upcoming'),
-      finished: document.getElementById('finished'),
+      today: document.getElementById('today'),
+      tomorrow: document.getElementById('tomorrow'),
+      startingSoon: document.getElementById('startingSoon'),
       leagues: document.getElementById('leagues')
     };
 
+    const LIVE_STATUSES = new Set(['LIVE', '1H', '2H', 'HT']);
+    const SCHEDULED_STATUSES = new Set(['NOT_STARTED', 'NS', 'TBD', 'SCHEDULED']);
     let allMatches = [];
 
-    const fmt = (m) => `${m.homeTeam.name} ${m.score.home}:${m.score.away} ${m.awayTeam.name}`;
+    function dayKey(iso) {
+      return new Date(iso).toISOString().slice(0, 10);
+    }
 
-    function groupAndRender(matches) {
-      const live = matches.filter((m) => m.status === 'LIVE' || m.status === 'HT');
-      const upcoming = matches.filter((m) => m.status === 'UPCOMING');
-      const finished = matches.filter((m) => m.status === 'FT');
+    function minsToKickoff(iso) {
+      return Math.floor((new Date(iso).getTime() - Date.now()) / 60000);
+    }
 
-      const render = (node, items) => {
-        if (!items.length) {
-          node.innerHTML = '<div class="status">Нет матчей</div>';
-          return;
-        }
+    function isLive(match) {
+      return LIVE_STATUSES.has(match.status) || LIVE_STATUSES.has(match.apiStatus);
+    }
 
-        node.innerHTML = items.map((m) => `
+    function isToday(match, today) {
+      return dayKey(match.startTime) === today;
+    }
+
+    function isTomorrow(match, tomorrow) {
+      return dayKey(match.startTime) === tomorrow;
+    }
+
+    function isNotStarted(match) {
+      return SCHEDULED_STATUSES.has(match.status) || SCHEDULED_STATUSES.has(match.apiStatus);
+    }
+
+    function render(node, items) {
+      if (!items.length) {
+        node.innerHTML = '<div class="status">Нет матчей</div>';
+        return;
+      }
+
+      node.innerHTML = items.map((m) => {
+        const minute = m.minute ? `${m.minute}'` : '';
+        return `
           <div class="match">
             <div class="teams">
               <span class="team"><img src="${m.homeTeam.logo}" width="24" height="24"/>${m.homeTeam.name}</span>
               <span>${m.score.home}:${m.score.away}</span>
               <span class="team">${m.awayTeam.name}<img src="${m.awayTeam.logo}" width="24" height="24"/></span>
             </div>
-            <div class="status"><span class="badge">${m.status}</span> ${m.minute || ''} • ${m.competition}</div>
+            <div class="status"><span class="badge">${m.status}</span> ${minute} • ${m.competition}</div>
             <a class="btn" href="/player.html?id=${encodeURIComponent(m.id)}">Открыть матч</a>
-          </div>`).join('');
-      };
+          </div>`;
+      }).join('');
+    }
+
+    function sortByTime(items) {
+      return [...items].sort((a, b) => new Date(a.startTime) - new Date(b.startTime));
+    }
+
+    function groupAndRender(matches) {
+      const now = new Date();
+      const today = now.toISOString().slice(0, 10);
+      const tomorrow = new Date(now.getTime() + 86400000).toISOString().slice(0, 10);
+
+      const live = sortByTime(matches.filter((m) => isLive(m)));
+      const todayMatches = sortByTime(matches.filter((m) => isToday(m, today) && isNotStarted(m)));
+      const tomorrowMatches = sortByTime(matches.filter((m) => isTomorrow(m, tomorrow) && isNotStarted(m)));
+      const startingSoon = sortByTime(
+        todayMatches.filter((m) => {
+          const mins = minsToKickoff(m.startTime);
+          return mins >= 0 && mins <= 30;
+        })
+      );
 
       render(ui.live, live);
-      render(ui.upcoming, upcoming);
-      render(ui.finished, finished);
+      render(ui.today, todayMatches);
+      render(ui.tomorrow, tomorrowMatches);
+      render(ui.startingSoon, startingSoon);
 
       const leagues = [...new Set(matches.map((m) => m.competition))];
       ui.leagues.innerHTML = leagues.map((l) => `<span class="league">${l}</span>`).join('');
-      ui.meta.textContent = `Всего матчей: ${matches.length}`;
+      ui.meta.textContent = `Всего матчей: ${matches.length} • LIVE: ${live.length}`;
     }
 
     async function fetchMatches() {
@@ -123,7 +170,7 @@
     let previousLiveCount = 0;
     async function tick() {
       await fetchMatches();
-      const currentLive = allMatches.filter((m) => m.status === 'LIVE').length;
+      const currentLive = allMatches.filter((m) => isLive(m)).length;
       if (Notification.permission === 'granted' && currentLive > previousLiveCount) {
         new Notification('VarMatch TV', { body: 'Новый матч перешёл в LIVE.' });
       }
@@ -131,7 +178,7 @@
     }
 
     tick();
-    setInterval(tick, 60000);
+    setInterval(tick, 30000);
   </script>
 </body>
 </html>
