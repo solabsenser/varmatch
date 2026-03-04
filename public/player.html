@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>VarMatch TV — Плеер</title>
+  <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+  <style>
+    :root {
+      --bg: #060a16;
+      --card: #121a2b;
+      --text: #e7ebf3;
+      --muted: #94a3b8;
+      --accent: #f43f5e;
+      --accent-soft: rgba(244, 63, 94, 0.18);
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+    }
+
+    .container { width: min(1040px, 92vw); margin: 28px auto 34px; display: grid; gap: 14px; }
+    .card {
+      background: linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0.01));
+      border: 1px solid rgba(148, 163, 184, 0.2);
+      border-radius: 18px;
+      padding: 16px;
+    }
+
+    .top { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+    h1 { margin: 0; font-size: clamp(1.2rem, 2vw, 1.8rem); }
+    .hint { margin: 0; color: var(--muted); }
+
+    .btn {
+      border: none;
+      cursor: pointer;
+      color: white;
+      background: linear-gradient(135deg, var(--accent), #fb7185);
+      font-weight: 600;
+      border-radius: 10px;
+      padding: 10px 14px;
+      text-decoration: none;
+      display: inline-block;
+    }
+
+    video {
+      width: 100%;
+      border-radius: 12px;
+      background: #000;
+      aspect-ratio: 16/9;
+    }
+
+    .meta {
+      color: var(--muted);
+      word-break: break-all;
+      font-size: .92rem;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <section class="card top">
+      <div>
+        <h1 id="title">Загрузка матча...</h1>
+        <p class="hint" id="status">Получаем поток с донорской страницы...</p>
+      </div>
+      <a class="btn" href="/">← К списку матчей</a>
+    </section>
+
+    <section class="card">
+      <video id="video" controls autoplay playsinline></video>
+      <p class="meta" id="donor"></p>
+    </section>
+  </div>
+
+  <script>
+    const video = document.getElementById('video');
+    const titleNode = document.getElementById('title');
+    const statusNode = document.getElementById('status');
+    const donorNode = document.getElementById('donor');
+
+    let hls;
+
+    function setStatus(message) {
+      statusNode.textContent = message;
+    }
+
+    function playStream(url) {
+      if (!url) return;
+
+      if (hls) {
+        hls.destroy();
+        hls = null;
+      }
+
+      if (window.Hls && Hls.isSupported()) {
+        hls = new Hls();
+        hls.loadSource(url);
+        hls.attachMedia(video);
+      } else {
+        video.src = url;
+      }
+
+      video.play().catch(() => {
+        setStatus('Нажмите Play, чтобы запустить трансляцию.');
+      });
+    }
+
+    async function bootstrap() {
+      const params = new URLSearchParams(window.location.search);
+      const matchId = params.get('id');
+
+      if (!matchId) {
+        setStatus('ID матча не передан. Вернитесь к списку матчей.');
+        return;
+      }
+
+      try {
+        const response = await fetch(`/api/matches/${encodeURIComponent(matchId)}/stream`);
+        if (!response.ok) {
+          throw new Error('stream');
+        }
+
+        const payload = await response.json();
+        titleNode.textContent = payload.title || 'Матч';
+        donorNode.textContent = payload.donorUrl ? `Источник: ${payload.donorUrl}` : '';
+        setStatus('Поток найден. Если не начался автоматически — нажмите Play.');
+        playStream(payload.stream);
+      } catch (_error) {
+        setStatus('Не удалось загрузить поток. Попробуйте открыть матч позже.');
+      }
+    }
+
+    bootstrap();
+  </script>
+</body>
+</html>
