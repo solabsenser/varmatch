@@ -5,188 +5,133 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>VarMatch TV</title>
   <style>
-    :root {
-      --bg: #060a16;
-      --card: #121a2b;
-      --text: #e7ebf3;
-      --muted: #94a3b8;
-      --accent: #f43f5e;
-      --accent-soft: rgba(244, 63, 94, 0.18);
-    }
-
-    * { box-sizing: border-box; }
-    body {
-      margin: 0;
-      font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif;
-      background:
-        radial-gradient(900px 420px at 100% -15%, rgba(244, 63, 94, 0.2), transparent 60%),
-        radial-gradient(500px 260px at -10% 0%, rgba(56, 189, 248, 0.16), transparent 70%),
-        var(--bg);
-      color: var(--text);
-      min-height: 100vh;
-    }
-
-    .container { width: min(1040px, 92vw); margin: 28px auto 34px; display: grid; gap: 18px; }
-    .hero, .panel {
-      background: linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0.01));
-      border: 1px solid rgba(148, 163, 184, 0.2);
-      border-radius: 18px;
-      backdrop-filter: blur(8px);
-    }
-
-    .hero { padding: 18px; display: flex; justify-content: space-between; gap: 14px; align-items: center; flex-wrap: wrap; }
-    .title { margin: 0; font-size: clamp(1.4rem, 2.4vw, 2rem); font-weight: 700; }
-    .title span { color: var(--accent); }
-    .tagline { margin-top: 6px; color: var(--muted); font-size: .95rem; }
-    .stats { display: flex; gap: 10px; flex-wrap: wrap; }
-    .pill {
-      padding: 7px 11px; border-radius: 999px; border: 1px solid rgba(148, 163, 184, 0.26);
-      color: #d1d9e6; background: rgba(2, 6, 23, .35); font-size: .82rem;
-    }
-
-    .panel { padding: 16px; }
-    .controls { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; justify-content: space-between; margin-bottom: 12px; }
-    .search { width: min(420px, 100%); position: relative; }
-    .search input {
-      width: 100%; padding: 11px 14px; border: 1px solid rgba(148, 163, 184, .25);
-      border-radius: 12px; background: rgba(2, 6, 23, .55); color: var(--text); outline: none;
-    }
-    .search input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
-    .btn {
-      border: none; cursor: pointer; color: white; background: linear-gradient(135deg, var(--accent), #fb7185);
-      font-weight: 600; border-radius: 10px; padding: 10px 14px; transition: transform .15s ease;
-    }
-    .btn:hover { transform: translateY(-1px); }
-    .status { color: var(--muted); margin: 0; font-size: .95rem; }
-
-    .match-list { display: grid; gap: 9px; max-height: 64vh; overflow: auto; padding-right: 2px; }
-    .match-card {
-      background: var(--card); border: 1px solid rgba(148, 163, 184, .2); border-radius: 12px;
-      padding: 10px 12px; display: flex; justify-content: space-between; gap: 10px; align-items: center;
-    }
-    .match-title { font-weight: 600; text-transform: uppercase; letter-spacing: .03em; }
-    .empty { color: var(--muted); text-align: center; padding: 20px 10px; }
-    a { color: inherit; text-decoration: none; }
+    :root { --bg:#060a16; --card:#121a2b; --text:#e7ebf3; --muted:#94a3b8; --accent:#f43f5e; }
+    * { box-sizing:border-box; }
+    body { margin:0; font-family:Inter,system-ui,sans-serif; background:var(--bg); color:var(--text); }
+    .container { width:min(1200px,94vw); margin:20px auto 32px; display:grid; gap:14px; }
+    .card { background:var(--card); border:1px solid #33415566; border-radius:16px; padding:14px; }
+    .top { display:flex; justify-content:space-between; gap:10px; align-items:center; flex-wrap:wrap; }
+    .search { width:min(420px,100%); padding:10px 12px; border-radius:10px; border:1px solid #334155; background:#0b1220; color:#fff; }
+    .columns { display:grid; gap:12px; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); }
+    .match { border:1px solid #33415588; border-radius:12px; padding:10px; margin-bottom:8px; }
+    .teams { display:flex; justify-content:space-between; align-items:center; gap:8px; font-weight:700; }
+    .team { display:flex; align-items:center; gap:8px; }
+    .status { color:var(--muted); font-size:.9rem; margin-top:6px; }
+    .badge { color:white; background:var(--accent); border-radius:999px; padding:2px 8px; font-size:.75rem; }
+    .btn { display:inline-block; margin-top:8px; color:white; text-decoration:none; background:linear-gradient(135deg,var(--accent),#fb7185); border-radius:10px; padding:8px 10px; font-weight:600; }
+    .league { display:inline-block; border:1px solid #334155; border-radius:999px; padding:4px 10px; margin:4px 6px 0 0; color:var(--muted); }
+    .ad { text-align:center; border:1px dashed #475569; color:var(--muted); border-radius:12px; padding:12px; }
   </style>
 </head>
 <body>
   <div class="container">
-    <section class="hero">
+    <section class="card top">
       <div>
-        <h1 class="title" id="app-title">VarMatch <span>TV</span></h1>
-        <div class="tagline" id="app-tagline">Матчи на сегодня и прямые трансляции</div>
+        <h1 id="title">VarMatch TV</h1>
+        <div id="meta" class="status">Live-центр футбольных матчей</div>
       </div>
-      <div class="stats">
-        <div class="pill" id="app-version">v2.1</div>
-        <div class="pill" id="match-count">Матчей сегодня: 0</div>
-      </div>
+      <input id="search" class="search" placeholder="Поиск: команда, турнир, матч" />
     </section>
 
-    <section class="panel">
-      <div class="controls">
-        <div class="search">
-          <input id="search-input" placeholder="Поиск матча..." />
-        </div>
-        <button class="btn" id="refresh-btn">Обновить список</button>
-      </div>
-      <p class="status" id="status">Загрузка матчей на сегодня...</p>
-      <div class="match-list" id="list"></div>
+    <section class="card">
+      <h3>Top Leagues</h3>
+      <div id="leagues"></div>
     </section>
+
+    <section class="columns">
+      <article class="card">
+        <h3>Live Matches</h3>
+        <div id="live"></div>
+      </article>
+      <article class="card">
+        <h3>Upcoming Matches</h3>
+        <div id="upcoming"></div>
+      </article>
+      <article class="card">
+        <h3>Finished Matches</h3>
+        <div id="finished"></div>
+      </article>
+    </section>
+
+    <section class="card ad">[Рекламный баннер] Здесь можно подключить AdSense / партнёрские офферы / pre-roll.</section>
   </div>
 
   <script>
     const ui = {
-      list: document.getElementById('list'),
-      status: document.getElementById('status'),
-      searchInput: document.getElementById('search-input'),
-      refreshBtn: document.getElementById('refresh-btn'),
-      appTitle: document.getElementById('app-title'),
-      appTagline: document.getElementById('app-tagline'),
-      appVersion: document.getElementById('app-version'),
-      matchCount: document.getElementById('match-count')
+      title: document.getElementById('title'),
+      meta: document.getElementById('meta'),
+      search: document.getElementById('search'),
+      live: document.getElementById('live'),
+      upcoming: document.getElementById('upcoming'),
+      finished: document.getElementById('finished'),
+      leagues: document.getElementById('leagues')
     };
 
     let allMatches = [];
-    let refreshInterval = 60000;
 
-    const setStatus = (message) => {
-      ui.status.textContent = message;
-    };
+    const fmt = (m) => `${m.homeTeam.name} ${m.score.home}:${m.score.away} ${m.awayTeam.name}`;
 
-    const escapeHtml = (text) => text
-      .replaceAll('&', '&amp;')
-      .replaceAll('<', '&lt;')
-      .replaceAll('>', '&gt;')
-      .replaceAll('"', '&quot;')
-      .replaceAll("'", '&#39;');
+    function groupAndRender(matches) {
+      const live = matches.filter((m) => m.status === 'LIVE' || m.status === 'HT');
+      const upcoming = matches.filter((m) => m.status === 'UPCOMING');
+      const finished = matches.filter((m) => m.status === 'FT');
 
-    async function loadConfig() {
-      try {
-        const res = await fetch('/api/config');
-        if (!res.ok) throw new Error('config');
-
-        const config = await res.json();
-        document.title = config.appTitle || 'VarMatch TV';
-        ui.appTitle.innerHTML = `${(config.appTitle || 'VarMatch').replace(' TV', '')} <span>TV</span>`;
-        ui.appTagline.textContent = config.appTagline || 'Матчи на сегодня и прямые трансляции';
-        ui.appVersion.textContent = config.appVersion || 'v2.1';
-        refreshInterval = Number(config.refreshIntervalMs) || refreshInterval;
-        if (config.accentColor) {
-          document.documentElement.style.setProperty('--accent', config.accentColor);
+      const render = (node, items) => {
+        if (!items.length) {
+          node.innerHTML = '<div class="status">Нет матчей</div>';
+          return;
         }
-      } catch (_error) {
-        setStatus('Работаем на локальной конфигурации интерфейса.');
-      }
+
+        node.innerHTML = items.map((m) => `
+          <div class="match">
+            <div class="teams">
+              <span class="team"><img src="${m.homeTeam.logo}" width="24" height="24"/>${m.homeTeam.name}</span>
+              <span>${m.score.home}:${m.score.away}</span>
+              <span class="team">${m.awayTeam.name}<img src="${m.awayTeam.logo}" width="24" height="24"/></span>
+            </div>
+            <div class="status"><span class="badge">${m.status}</span> ${m.minute || ''} • ${m.competition}</div>
+            <a class="btn" href="/player.html?id=${encodeURIComponent(m.id)}">Открыть матч</a>
+          </div>`).join('');
+      };
+
+      render(ui.live, live);
+      render(ui.upcoming, upcoming);
+      render(ui.finished, finished);
+
+      const leagues = [...new Set(matches.map((m) => m.competition))];
+      ui.leagues.innerHTML = leagues.map((l) => `<span class="league">${l}</span>`).join('');
+      ui.meta.textContent = `Всего матчей: ${matches.length}`;
     }
 
-    function renderList(items) {
-      ui.matchCount.textContent = `Матчей сегодня: ${items.length}`;
-
-      if (!items.length) {
-        ui.list.innerHTML = '<div class="empty">Матчи не найдены. Попробуйте обновить позже.</div>';
-        return;
-      }
-
-      ui.list.innerHTML = items.map((match) => `
-        <article class="match-card">
-          <div class="match-title">${escapeHtml(match.title.toUpperCase())}</div>
-          <a class="btn" href="/player.html?id=${encodeURIComponent(match.id)}">Открыть плеер</a>
-        </article>
-      `).join('');
+    async function fetchMatches() {
+      const r = await fetch('/matches');
+      const p = await r.json();
+      allMatches = p.matches || [];
+      groupAndRender(allMatches);
     }
 
-    async function loadMatches() {
-      try {
-        setStatus('Обновляем список матчей на сегодня...');
-        const res = await fetch('/api/matches/today');
-        const payload = await res.json();
-        allMatches = Array.isArray(payload.matches) ? payload.matches : [];
-
-        setStatus(allMatches.length ? 'Доступные матчи на сегодня:' : 'Матчи пока не найдены, дождитесь следующего обновления.');
-        renderList(allMatches);
-      } catch (_error) {
-        setStatus('Ошибка загрузки. Проверьте API /api/matches/today.');
-      }
-    }
-
-    ui.searchInput.addEventListener('input', () => {
-      const query = ui.searchInput.value.trim().toLowerCase();
-      if (!query) {
-        renderList(allMatches);
-        return;
-      }
-
-      const filtered = allMatches.filter((item) => item.title.toLowerCase().includes(query));
-      renderList(filtered);
+    ui.search.addEventListener('input', async () => {
+      const q = ui.search.value.trim();
+      if (!q) return groupAndRender(allMatches);
+      const r = await fetch(`/search?q=${encodeURIComponent(q)}`);
+      const items = await r.json();
+      groupAndRender(items);
     });
 
-    ui.refreshBtn.addEventListener('click', loadMatches);
+    if ('Notification' in window) Notification.requestPermission();
 
-    (async () => {
-      await loadConfig();
-      await loadMatches();
-      setInterval(loadMatches, refreshInterval);
-    })();
+    let previousLiveCount = 0;
+    async function tick() {
+      await fetchMatches();
+      const currentLive = allMatches.filter((m) => m.status === 'LIVE').length;
+      if (Notification.permission === 'granted' && currentLive > previousLiveCount) {
+        new Notification('VarMatch TV', { body: 'Новый матч перешёл в LIVE.' });
+      }
+      previousLiveCount = currentLive;
+    }
+
+    tick();
+    setInterval(tick, 60000);
   </script>
 </body>
 </html>
