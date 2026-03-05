@@ -50,6 +50,33 @@ const readDb = () => {
 
 const writeDb = (payload) => fs.writeFileSync(DB_FILE, JSON.stringify(payload, null, 2));
 
+const createDonorUrl = (match, section = 'search') => {
+  if (!DONOR_STREAM_URL) return '';
+
+  const home = (match.homeTeam?.name || '').trim();
+  const away = (match.awayTeam?.name || '').trim();
+  const teamPair = `${home} ${away}`.trim();
+
+  const withPlaceholders = DONOR_STREAM_URL
+    .replaceAll('{home}', encodeURIComponent(home))
+    .replaceAll('{away}', encodeURIComponent(away))
+    .replaceAll('{query}', encodeURIComponent(teamPair));
+
+  try {
+    const url = new URL(withPlaceholders);
+    if (!url.searchParams.get('q') && teamPair) {
+      url.searchParams.set('q', teamPair);
+    }
+    url.searchParams.set('only', 'stream,stats');
+    url.searchParams.set('view', section);
+    return url.toString();
+  } catch {
+    if (!teamPair) return withPlaceholders;
+    const divider = withPlaceholders.includes('?') ? '&' : '?';
+    return `${withPlaceholders}${divider}q=${encodeURIComponent(teamPair)}&only=stream%2Cstats&view=${encodeURIComponent(section)}`;
+  }
+};
+
 const toIsoDate = (date) => date.toISOString().slice(0, 10);
 const addDays = (date, diff) => new Date(date.getTime() + diff * 86400000);
 
@@ -87,7 +114,7 @@ const normalizeFixture = (item) => {
     apiStatus: shortStatus,
     minute: fixture.status?.elapsed ?? null,
     streams: DONOR_STREAM_URL
-      ? [{ provider: 'Donor', type: 'iframe', url: DONOR_STREAM_URL, embed: true }]
+      ? [{ provider: 'Donor', type: 'redirect', url: createDonorUrl({ homeTeam: { name: teams.home?.name }, awayTeam: { name: teams.away?.name } }, 'stream'), embed: false }]
       : [],
     stats: {
       possessionHome: 50,
@@ -220,7 +247,7 @@ function refreshStreams() {
   const matches = db.matches.map((match) => ({
     ...match,
     streams: DONOR_STREAM_URL
-      ? [{ provider: 'Donor', type: 'iframe', url: DONOR_STREAM_URL, embed: true }]
+      ? [{ provider: 'Donor', type: 'redirect', url: createDonorUrl(match, 'stream'), embed: false }]
       : []
   }));
   writeDb({ ...db, matches, lastStreamScanAt: new Date().toISOString() });
@@ -286,19 +313,33 @@ app.get('/api/matches/:id/stream', (req, res) => {
   const db = readDb();
   const item = db.matches.find((m) => m.id === req.params.id);
   if (!item) return res.status(404).json({ error: 'Матч не найден' });
-  const stream = item.streams.find((s) => s.embed);
-  if (!stream) return res.status(404).json({ error: 'Поток не найден: укажите DONOR_STREAM_URL' });
+  if (!DONOR_STREAM_URL) return res.status(404).json({ error: 'Поток не найден: укажите DONOR_STREAM_URL' });
+
+  const donorStreamUrl = createDonorUrl(item, 'stream');
+  const donorStatsUrl = createDonorUrl(item, 'stats');
+  const donorSearchUrl = createDonorUrl(item, 'search');
+
   return res.json({
     id: item.id,
     title: `${item.homeTeam.name} vs ${item.awayTeam.name}`,
-    stream: stream.url,
-    streamType: stream.type,
+    stream: donorStreamUrl,
+    streamType: 'redirect',
+    donorStatsUrl,
+    donorSearchUrl,
     competition: item.competition,
     status: item.status,
     minute: item.minute,
     score: item.score,
     stats: item.stats
   });
+});
+
+app.get('/go/:id', (req, res) => {
+  const db = readDb();
+  const item = db.matches.find((m) => m.id === req.params.id);
+  if (!item) return res.status(404).json({ error: 'Матч не найден' });
+  if (!DONOR_STREAM_URL) return res.status(404).json({ error: 'Укажите DONOR_STREAM_URL' });
+  return res.redirect(createDonorUrl(item, 'search'));
 });
 
 cron.schedule(BASE_UPDATE_CRON, () => {

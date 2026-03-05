@@ -4,16 +4,14 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>VarMatch TV — Match</title>
-  <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
   <style>
     body { margin:0; font-family:Inter,system-ui,sans-serif; background:#060a16; color:#e7ebf3; }
     .container { width:min(1100px,94vw); margin:20px auto; display:grid; gap:12px; }
     .card { background:#121a2b; border:1px solid #33415566; border-radius:16px; padding:14px; }
     .row { display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap; }
-    iframe, video { width:100%; min-height:480px; border:0; border-radius:10px; background:#000; }
     .stats { display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:8px; }
     .stat { padding:10px; border:1px solid #33415588; border-radius:10px; }
-    .btn { color:white; text-decoration:none; background:#f43f5e; border-radius:8px; padding:8px 10px; }
+    .btn { color:white; text-decoration:none; background:#f43f5e; border-radius:8px; padding:8px 10px; display:inline-block; margin-right:8px; }
   </style>
 </head>
 <body>
@@ -35,7 +33,6 @@
   </div>
 
   <script>
-    let hls;
     const title = document.getElementById('title');
     const meta = document.getElementById('meta');
     const playerWrap = document.getElementById('playerWrap');
@@ -51,21 +48,14 @@
       stats.innerHTML = entries.map(([k, v]) => `<div class="stat"><strong>${k}</strong><div>${v}</div></div>`).join('');
     }
 
-    function mountPlayer(url, type) {
-      if (type === 'iframe') {
-        playerWrap.innerHTML = `<iframe allowfullscreen src="${url}"></iframe>`;
-        return;
-      }
-
-      playerWrap.innerHTML = '<video id="video" controls autoplay playsinline></video>';
-      const video = document.getElementById('video');
-      if (window.Hls && Hls.isSupported()) {
-        hls = new Hls({ lowLatencyMode: true });
-        hls.loadSource(url);
-        hls.attachMedia(video);
-      } else {
-        video.src = url;
-      }
+    function mountPlayer(streamUrl, statsUrl, searchUrl) {
+      playerWrap.innerHTML = `
+        <h3>Донор-страницы</h3>
+        <p>Открывайте только нужные разделы: трансляцию и статистику. Плеер можно доработать отдельным скриптом в новом окне.</p>
+        <a class="btn" href="${streamUrl}" target="_blank" rel="noopener noreferrer">Только трансляция</a>
+        <a class="btn" href="${statsUrl}" target="_blank" rel="noopener noreferrer">Только статистика</a>
+        <a class="btn" href="${searchUrl}" target="_blank" rel="noopener noreferrer">Результаты поиска</a>
+      `;
     }
 
     async function loadMatch() {
@@ -80,7 +70,7 @@
       title.textContent = m.title;
       meta.textContent = `${m.competition} • ${m.status} ${m.minute || ''} • Счёт ${m.score.home}:${m.score.away}`;
       renderStats(m.stats);
-      mountPlayer(m.stream, m.streamType);
+      mountPlayer(m.stream, m.donorStatsUrl, m.donorSearchUrl);
     }
 
     loadMatch();
