@@ -33,6 +33,10 @@ const DB_FILE = getEnv('DB_FILE', './streams_db.json');
 const APP_TITLE = getEnv('APP_TITLE', 'VarMatch TV');
 const APP_VERSION = getEnv('APP_VERSION', 'v3.1');
 const DONOR_STREAM_URL = getEnv('DONOR_STREAM_URL', '');
+const DONOR_STREAM_SOURCES = String(getEnv('DONOR_STREAM_SOURCES', ''))
+  .split(',')
+  .map((item) => item.trim())
+  .filter(Boolean);
 const STREAM_DISCOVERY_ENABLED = getEnv('STREAM_DISCOVERY_ENABLED', '1') !== '0';
 const STREAM_SCAN_LIMIT = Math.max(1, Number(getEnv('STREAM_SCAN_LIMIT', 4)) || 4);
 const BASE_UPDATE_CRON = getEnv('REFRESH_MATCHES_CRON', '*/10 * * * *');
@@ -135,13 +139,17 @@ const fetchTextWithHttps = (url, headers = {}) => new Promise((resolve, reject) 
 });
 
 const createDonorUrl = (match, section = 'search') => {
-  if (!DONOR_STREAM_URL) return '';
+  return createDonorUrlFromTemplate(DONOR_STREAM_URL, match, section);
+};
+
+const createDonorUrlFromTemplate = (template, match, section = 'search') => {
+  if (!template) return '';
 
   const home = (match.homeTeam?.name || '').trim();
   const away = (match.awayTeam?.name || '').trim();
   const teamPair = `${home} ${away}`.trim();
 
-  const withPlaceholders = DONOR_STREAM_URL
+  const withPlaceholders = template
     .replace(/\{home\}/g, encodeURIComponent(home))
     .replace(/\{away\}/g, encodeURIComponent(away))
     .replace(/\{query\}/g, encodeURIComponent(teamPair));
@@ -159,6 +167,11 @@ const createDonorUrl = (match, section = 'search') => {
     const divider = withPlaceholders.includes('?') ? '&' : '?';
     return `${withPlaceholders}${divider}q=${encodeURIComponent(teamPair)}&only=stream%2Cstats&view=${encodeURIComponent(section)}`;
   }
+};
+
+const getDonorSources = () => {
+  const sources = DONOR_STREAM_SOURCES.length ? DONOR_STREAM_SOURCES : (DONOR_STREAM_URL ? [DONOR_STREAM_URL] : []);
+  return sources.slice(0, STREAM_SCAN_LIMIT);
 };
 
 const toIsoDate = (date) => date.toISOString().slice(0, 10);
@@ -185,7 +198,7 @@ const dedupeStreams = (streams) => {
   return unique;
 };
 
-const discoverStreamsFromHtml = (html, baseUrl) => {
+const discoverStreamsFromHtml = (html, baseUrl, providerName = 'donor') => {
   const iframeSources = collectByRegex(html, /<iframe[^>]+src=["']([^"']+)["']/gi);
   const sourceSources = collectByRegex(html, /<(?:source|video)[^>]+src=["']([^"']+)["']/gi);
   const directPlaylist = collectByRegex(html, /(https?:\/\/[^"'\s>]+\.(?:m3u8|mpd)(?:\?[^"'\s>]*)?)/gi);
@@ -201,30 +214,37 @@ const discoverStreamsFromHtml = (html, baseUrl) => {
   };
 
   const candidates = [
-    ...iframeSources.map((url) => ({ provider: 'Donor iframe', type: 'embed', url: toAbsolute(url), embed: true })),
-    ...sourceSources.map((url) => ({ provider: 'Donor video', type: 'direct', url: toAbsolute(url), embed: false })),
-    ...directPlaylist.map((url) => ({ provider: 'Playlist', type: 'direct', url: toAbsolute(url), embed: false })),
-    ...hintedEmbed.map((url) => ({ provider: 'Embedded player', type: 'embed', url: toAbsolute(url), embed: true }))
+    ...iframeSources.map((url) => ({ provider: `${providerName} iframe`, type: 'embed', url: toAbsolute(url), embed: true })),
+    ...sourceSources.map((url) => ({ provider: `${providerName} video`, type: 'direct', url: toAbsolute(url), embed: false })),
+    ...directPlaylist.map((url) => ({ provider: `${providerName} playlist`, type: 'direct', url: toAbsolute(url), embed: false })),
+    ...hintedEmbed.map((url) => ({ provider: `${providerName} player`, type: 'embed', url: toAbsolute(url), embed: true }))
   ];
 
   return dedupeStreams(candidates).filter((stream) => stream.url).slice(0, STREAM_SCAN_LIMIT);
 };
 
 async function discoverStreamsForMatch(match) {
-  if (!DONOR_STREAM_URL || !STREAM_DISCOVERY_ENABLED) return [];
+  if (!STREAM_DISCOVERY_ENABLED) return [];
 
-  const donorSearchUrl = createDonorUrl(match, 'search');
-  if (!donorSearchUrl) return [];
+  const discovered = [];
+  const sources = getDonorSources();
+  for (const source of sources) {
+    const donorSearchUrl = createDonorUrlFromTemplate(source, match, 'search');
+    if (!donorSearchUrl) continue;
 
-  try {
-    const html = globalThis.fetch
-      ? await (await globalThis.fetch(donorSearchUrl, { headers: { 'user-agent': 'Mozilla/5.0 VarMatchBot/1.0' } })).text()
-      : await fetchTextWithHttps(donorSearchUrl, { 'user-agent': 'Mozilla/5.0 VarMatchBot/1.0' });
-    return discoverStreamsFromHtml(html, donorSearchUrl);
-  } catch (error) {
-    console.warn(`⚠️ Не удалось найти встроенный стрим для ${match.id}: ${error.message}`);
-    return [];
+    try {
+      const html = globalThis.fetch
+        ? await (await globalThis.fetch(donorSearchUrl, { headers: { 'user-agent': 'Mozilla/5.0 VarMatchBot/1.0' } })).text()
+        : await fetchTextWithHttps(donorSearchUrl, { 'user-agent': 'Mozilla/5.0 VarMatchBot/1.0' });
+
+      const providerHost = new URL(donorSearchUrl).hostname.replace(/^www\./, '');
+      discovered.push(...discoverStreamsFromHtml(html, donorSearchUrl, providerHost));
+    } catch (error) {
+      console.warn(`⚠️ Не удалось найти встроенный стрим для ${match.id} (${source}): ${error.message}`);
+    }
   }
+
+  return dedupeStreams(discovered).slice(0, STREAM_SCAN_LIMIT);
 }
 
 const normalizeStatus = (short) => {
@@ -260,7 +280,7 @@ const normalizeFixture = (item) => {
     status: normalizeStatus(shortStatus),
     apiStatus: shortStatus,
     minute: fixture.status?.elapsed ?? null,
-    streams: DONOR_STREAM_URL
+    streams: getDonorSources().length
       ? [{ provider: 'Donor', type: 'redirect', url: createDonorUrl({ homeTeam: { name: teams.home?.name }, awayTeam: { name: teams.away?.name } }, 'stream'), embed: false }]
       : [],
     stats: {
@@ -390,13 +410,14 @@ async function refreshStreams() {
   try {
     const matches = await Promise.all(db.matches.map(async (match) => {
     const discovered = await discoverStreamsForMatch(match);
-    const fallback = DONOR_STREAM_URL
+    const fallback = getDonorSources().length
       ? [{ provider: 'Donor', type: 'redirect', url: createDonorUrl(match, 'stream'), embed: false }]
       : [];
 
     return {
       ...match,
-      streams: discovered.length ? discovered : fallback
+      streams: discovered.length ? discovered : fallback,
+      streamUpdatedAt: new Date().toISOString()
     };
   }));
     writeDb({ ...db, matches, lastStreamScanAt: new Date().toISOString() });
@@ -465,7 +486,9 @@ app.get('/api/matches/:id/stream', (req, res) => {
   const db = readDb();
   const item = db.matches.find((m) => m.id === req.params.id);
   if (!item) return res.status(404).json({ error: 'Матч не найден' });
-  if (!DONOR_STREAM_URL) return res.status(404).json({ error: 'Поток не найден: укажите DONOR_STREAM_URL' });
+  if (!item.streams?.length && !getDonorSources().length) {
+    return res.status(404).json({ error: 'Поток не найден: укажите DONOR_STREAM_URL или DONOR_STREAM_SOURCES' });
+  }
 
   const donorStreamUrl = createDonorUrl(item, 'stream');
   const donorStatsUrl = createDonorUrl(item, 'stats');
