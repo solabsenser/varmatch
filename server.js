@@ -2,6 +2,24 @@ const express = require('express');
 const cron = require('node-cron');
 const Fuse = require('fuse.js');
 const fs = require('fs');
+const path = require('path');
+const https = require('https');
+
+const loadDotEnv = (envFile = '.env') => {
+  if (!fs.existsSync(envFile)) return;
+  const lines = fs.readFileSync(envFile, 'utf8').split(/\r?\n/);
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) continue;
+    const separatorIdx = trimmed.indexOf('=');
+    if (separatorIdx <= 0) continue;
+    const key = trimmed.slice(0, separatorIdx).trim();
+    const value = trimmed.slice(separatorIdx + 1).trim();
+    if (key && process.env[key] === undefined) process.env[key] = value;
+  }
+};
+
+loadDotEnv();
 
 const app = express();
 
@@ -32,23 +50,66 @@ const UI_CONFIG = {
   accentColor: getEnv('ACCENT_COLOR', '#f43f5e')
 };
 
-if (!fs.existsSync(DB_FILE)) {
-  fs.writeFileSync(DB_FILE, JSON.stringify({ matches: [], updatedAt: null }, null, 2));
-}
+const ensureDbFile = () => {
+  if (!fs.existsSync(DB_FILE)) {
+    const dbDir = path.dirname(DB_FILE);
+    if (dbDir && dbDir !== '.' && !fs.existsSync(dbDir)) {
+      fs.mkdirSync(dbDir, { recursive: true });
+    }
+    fs.writeFileSync(DB_FILE, JSON.stringify({ matches: [], updatedAt: null }, null, 2));
+  }
+};
+
+ensureDbFile();
 
 app.use(express.static('public'));
 
 const readDb = () => {
-  const raw = JSON.parse(fs.readFileSync(DB_FILE, 'utf8'));
-  return {
-    matches: Array.isArray(raw.matches) ? raw.matches : [],
-    updatedAt: raw.updatedAt || null,
-    lastStatsUpdateAt: raw.lastStatsUpdateAt || null,
-    lastStreamScanAt: raw.lastStreamScanAt || null
-  };
+  try {
+    const file = fs.readFileSync(DB_FILE, 'utf8').trim();
+    if (!file) {
+      return { matches: [], updatedAt: null, lastStatsUpdateAt: null, lastStreamScanAt: null };
+    }
+
+    const raw = JSON.parse(file);
+    return {
+      matches: Array.isArray(raw.matches) ? raw.matches : [],
+      updatedAt: raw.updatedAt || null,
+      lastStatsUpdateAt: raw.lastStatsUpdateAt || null,
+      lastStreamScanAt: raw.lastStreamScanAt || null
+    };
+  } catch {
+    return { matches: [], updatedAt: null, lastStatsUpdateAt: null, lastStreamScanAt: null };
+  }
 };
 
 const writeDb = (payload) => fs.writeFileSync(DB_FILE, JSON.stringify(payload, null, 2));
+
+const fetchJsonWithHttps = (url, headers = {}) => new Promise((resolve, reject) => {
+  const request = https.request(url, { method: 'GET', headers }, (response) => {
+    let body = '';
+    response.setEncoding('utf8');
+    response.on('data', (chunk) => {
+      body += chunk;
+    });
+    response.on('end', () => {
+      const ok = (response.statusCode || 500) >= 200 && (response.statusCode || 500) < 300;
+      if (!ok) {
+        reject(new Error(`Football API error: ${response.statusCode || 500}`));
+        return;
+      }
+
+      try {
+        resolve(JSON.parse(body));
+      } catch {
+        reject(new Error('Football API error: invalid JSON response'));
+      }
+    });
+  });
+
+  request.on('error', reject);
+  request.end();
+});
 
 const createDonorUrl = (match, section = 'search') => {
   if (!DONOR_STREAM_URL) return '';
@@ -58,9 +119,9 @@ const createDonorUrl = (match, section = 'search') => {
   const teamPair = `${home} ${away}`.trim();
 
   const withPlaceholders = DONOR_STREAM_URL
-    .replaceAll('{home}', encodeURIComponent(home))
-    .replaceAll('{away}', encodeURIComponent(away))
-    .replaceAll('{query}', encodeURIComponent(teamPair));
+    .replace(/\{home\}/g, encodeURIComponent(home))
+    .replace(/\{away\}/g, encodeURIComponent(away))
+    .replace(/\{query\}/g, encodeURIComponent(teamPair));
 
   try {
     const url = new URL(withPlaceholders);
@@ -180,18 +241,14 @@ async function fetchFixturesByDate(dateStr) {
   const url = new URL(FOOTBALL_API_URL);
   url.searchParams.set('date', dateStr);
 
-  const response = await fetch(url, {
-    headers: {
-      'x-apisports-key': FOOTBALL_API_KEY,
-      'x-apisports-host': FOOTBALL_API_HOST
-    }
-  });
+  const headers = {
+    'x-apisports-key': FOOTBALL_API_KEY,
+    'x-apisports-host': FOOTBALL_API_HOST
+  };
 
-  if (!response.ok) {
-    throw new Error(`Football API error: ${response.status}`);
-  }
-
-  const payload = await response.json();
+  const payload = globalThis.fetch
+    ? await (await globalThis.fetch(url, { headers })).json()
+    : await fetchJsonWithHttps(url, headers);
   return Array.isArray(payload.response) ? payload.response.map(normalizeFixture) : [];
 }
 
